@@ -1,0 +1,55 @@
+# nginx2root lab: three targets side by side.
+#   https://<host>:8443   vulnerable  (1.31.8, HTTP/2 + HTTP/3 on)
+#   https://<host>:9443   patched     (1.31.9, same config)
+#   https://<host>:10443  mitigated   (1.31.8, workarounds applied)
+#
+# BIND controls which interface the ports are published on:
+#   BIND=127.0.0.1 docker compose up -d --build   # host-only (safest)
+#   docker compose up -d --build                   # all interfaces (default) so
+#                                                   # another laptop can reach it
+#
+# WARNING: the vulnerable target is intentionally insecure. Only publish it on
+# an isolated/trusted lab network. Never port-forward it to the internet.
+#
+# AddressSanitizer build:  ASAN=1 docker compose up --build
+
+services:
+  backend:
+    image: python:3.12-alpine
+    command: ["python", "-m", "http.server", "8000"]
+
+  vulnerable:
+    build:
+      context: .
+      args:
+        NGINX_VERSION: "1.31.8"
+        ASAN: "${ASAN:-0}"
+    image: nginx2root-lab:1.31.8
+    volumes:
+      - ./conf/vulnerable.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${BIND:-0.0.0.0}:8443:443/tcp"
+      - "${BIND:-0.0.0.0}:8443:443/udp"
+    depends_on: [backend]
+
+  patched:
+    build:
+      context: .
+      args:
+        NGINX_VERSION: "1.31.9"
+        ASAN: "${ASAN:-0}"
+    image: nginx2root-lab:1.31.9
+    volumes:
+      - ./conf/vulnerable.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${BIND:-0.0.0.0}:9443:443/tcp"
+      - "${BIND:-0.0.0.0}:9443:443/udp"
+    depends_on: [backend]
+
+  mitigated:
+    image: nginx2root-lab:1.31.8   # reuses the vulnerable build
+    volumes:
+      - ./conf/mitigated.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${BIND:-0.0.0.0}:10443:443/tcp"
+    depends_on: [backend, vulnerable]
